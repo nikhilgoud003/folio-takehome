@@ -12,7 +12,7 @@ $pdo = db();
 $pdo->exec(file_get_contents(__DIR__ . '/schema.sql'));
 run_migrations($pdo);
 
-$pdo->exec("INSERT INTO staff (email, name) VALUES ('freddy@folio.example', 'Freddy Folio')");
+$pdo->exec("INSERT INTO staff (email, name) VALUES ('nikhil@folio.example', 'Nikhil')");
 
 // regular doc, visible immediately
 $rid1 = make_readable_id('Welcome Packet');
