@@ -4,18 +4,24 @@ require __DIR__ . '/../lib/bootstrap.php';
 require __DIR__ . '/../lib/layout.php';
 
 $staff = current_staff();
-$docId = (int) ($_GET['doc'] ?? 0);
-$stmt = db()->prepare('SELECT * FROM documents WHERE id = ?');
-$stmt->execute([$docId]);
+
+// support both ?doc=1 (numeric) and ?rid=welcome-packet-3f9a (readable id)
+if (!empty($_GET['rid'])) {
+    $stmt = db()->prepare('SELECT * FROM documents WHERE readable_id = ?');
+    $stmt->execute([trim($_GET['rid'])]);
+} else {
+    $docId = (int) ($_GET['doc'] ?? 0);
+    $stmt  = db()->prepare('SELECT * FROM documents WHERE id = ?');
+    $stmt->execute([$docId]);
+}
+
 $doc = $stmt->fetch();
 
 if (!$doc) {
     http_response_code(404);
     render_header('Not found', $staff);
-    ?>
-    <div class="banner banner-error">Document not found.</div>
-    <p><a href="/admin.php" class="back-link">← back to admin</a></p>
-    <?php
+    echo '<div class="banner banner-error">Document not found.</div>';
+    echo '<p><a href="/admin.php" class="back-link">← back to admin</a></p>';
     render_footer();
     exit;
 }
@@ -29,16 +35,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Recipient email is required.';
     } else {
         $token = random_token();
-        $stmt = db()->prepare('
-            INSERT INTO shares (document_id, token, recipient_email)
-            VALUES (?, ?, ?)
-        ');
+        $stmt  = db()->prepare('INSERT INTO shares (document_id, token, recipient_email) VALUES (?, ?, ?)');
         $stmt->execute([$doc['id'], $token, $email]);
         $shareId = (int) db()->lastInsertId();
-        audit_log('create', 'share', $shareId, [
-            'document_id' => $doc['id'],
-            'recipient_email' => $email,
-        ]);
+        audit_log('create', 'share', $shareId, ['document_id' => $doc['id'], 'recipient_email' => $email]);
         $created_token = $token;
     }
 }
@@ -49,7 +49,9 @@ render_header('Share · ' . $doc['title'], $staff);
 <a href="/admin.php" class="back-link">← back to admin</a>
 
 <h1 class="page-title">Share "<?= h($doc['title']) ?>"</h1>
-<p class="page-subtitle">Generate a one-time link for a recipient.</p>
+<?php if ($doc['readable_id']): ?>
+    <p class="page-subtitle">ID: <code><?= h($doc['readable_id']) ?></code></p>
+<?php endif ?>
 
 <?php if ($error): ?>
     <div class="banner banner-error"><?= h($error) ?></div>
@@ -57,8 +59,7 @@ render_header('Share · ' . $doc['title'], $staff);
 
 <?php if ($created_token): ?>
     <div class="banner banner-success">
-        Share link ready:
-        <code>http://<?= h($_SERVER['HTTP_HOST']) ?>/view.php?token=<?= h($created_token) ?></code>
+        Share link: <code>http://<?= h($_SERVER['HTTP_HOST']) ?>/view.php?token=<?= h($created_token) ?></code>
     </div>
 <?php endif ?>
 

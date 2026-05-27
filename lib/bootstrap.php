@@ -43,6 +43,16 @@ function random_token(int $bytes = 16): string {
     return bin2hex(random_bytes($bytes));
 }
 
+// turns "Welcome Packet" into something like "welcome-packet-3f9a"
+// random suffix keeps it unique even when titles repeat
+function make_readable_id(string $title): string {
+    $slug = strtolower($title);
+    $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+    $slug = trim($slug, '-');
+    $slug = substr($slug, 0, 40);
+    return $slug . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
+}
+
 function h(string $s): string {
     return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 }

@@ -1,18 +1,16 @@
-# Folio Take-Home
-
-A small document-sharing app. You'll be extending it with features that customers have been asking for.
+# Folio Take-Home — Nikhil's Submission
 
 ## Setup
 
-Requires Docker (with Compose). That's it — PHP, SQLite, and everything else ship inside the container.
+Requires Docker (with Compose). Everything else ships inside the container.
 
 ```
 docker compose up
 ```
 
-Open http://localhost:8000. The first run builds the image (~30 seconds); subsequent runs start instantly.
+Open http://localhost:8000. First run builds the image (~30 seconds); subsequent runs start instantly.
 
-Each `docker compose up` re-seeds `db.sqlite` from scratch, so you always start with a known state. Stop with `Ctrl+C`.
+Each `docker compose up` re-seeds `db.sqlite` from scratch so you always start with a known state. Stop with `Ctrl+C`.
 
 To run the tests:
 
@@ -20,75 +18,110 @@ To run the tests:
 docker compose exec app php tests/test.php
 ```
 
-You edit files on your host machine in your normal editor — the container has them mounted, so changes show up immediately on browser refresh.
+You edit files on your host machine — the container has them mounted, so changes show up immediately on browser refresh.
 
-## Background
+---
 
-Folio is a small tool that lets staff create documents and share them with recipients via one-time links. This repo contains a staff admin page, document creation, share-link generation, and a recipient view. The schema (`schema.sql`) and helpers (`lib/bootstrap.php`) are meant to feel representative of a real internal tool.
+## What I Built
 
-Take some time to read the code before you start building.
+I completed all three features within the ~3 hour budget.
 
-## Agent setup
+### Feature 1 — Scheduled Publishing
 
-How you configure this repo for AI-assisted work is part of the exercise. That can include context files, permissions, hooks, custom commands, conventions to follow, orchestration (subagents, parallel tasks, custom skills or commands) — whatever fits how you work.
+Staff can now set an optional publish date and time when creating a document. If a recipient clicks a share link before that time, they see a "Not yet available" page with the scheduled date. After the time passes, the same link works automatically with no action needed from staff.
 
-We're not prescribing specifics. Commit what you'd commit on a real project. If you decide setup isn't worth it for a three-hour exercise, say so in your video and explain why.
+**Implementation:**
+- `migrations/001_scheduled_publishing.sql` adds a nullable `publish_at TEXT` column to `documents`
+- `public/admin.php` has a `datetime-local` input on the create form (blank = publish immediately)
+- `public/view.php` compares `publish_at` against the current time and returns HTTP 403 with a "not yet available" screen if the document isn't ready yet
+- Both blocked and successful views are written to `audit_log`
+- The admin document list shows a green "Published" badge or an amber "Scheduled: <datetime>" badge per document
 
-## Your Task
+**Design decision:** `publish_at` is stored in the app's local timezone (America/Chicago, set in bootstrap.php) and compared using PHP's `date()` rather than SQLite's `datetime('now')` which returns UTC. This keeps the comparison self-consistent and matches what staff see when they pick a date in the form.
 
-Customers have asked for three things. Pick an order, scope as you see fit, and build as much as you can in the time you have.
+---
 
-### 1. Scheduled publishing
+### Feature 2 — Human-Readable Document IDs
 
-Staff should be able to prepare a document in advance and have it become visible to recipients at a specific date and time. Before that time, someone hitting the share link should see a "not yet available" message instead of the document.
+Every document now gets a readable ID automatically on creation — for example `welcome-packet-3d77` or `onboarding-guide-7249`.
 
-### 2. Human-readable document IDs
+**Format:** `<title-slug>-<4-char-hex-suffix>`
 
-Today documents are identified by auto-increment integers (`#1`, `#2`) and share links use opaque hex tokens. Customers want each document to have a **short, readable ID** — something a person could say out loud, type into a URL, or paste into an email. Examples of the shape (not prescriptive): `welcome-2026`, `onboarding-packet-3k`, `FOLIO-7QX4`.
+The title is lowercased and non-alphanumeric characters replaced with hyphens. A 4-character random hex suffix (~65,000 values) is appended to avoid collisions without needing a round-trip uniqueness check — practical for an internal tool at any reasonable scale.
 
-The exact format, length, and URL structure are your call. Think about collisions, guessability, and how this interacts with the existing share-token mechanism.
+**Implementation:**
+- `migrations/002_readable_ids.sql` adds a `readable_id TEXT UNIQUE` column with a unique index
+- `make_readable_id()` helper lives in `lib/bootstrap.php`
+- `public/share.php` accepts `?rid=<readable-id>` as an alternative to `?doc=<int>` for staff lookups
+- Readable IDs are shown in the admin document table
 
-### 3. Share by name
+**Key design decision — readable IDs are staff-facing only.** Recipients continue to use opaque hex share tokens. If readable IDs were exposed in recipient-facing URLs, anyone could enumerate documents by guessing slugs (e.g. `view.php?rid=budget-2026-xxxx`). The two mechanisms complement each other rather than one replacing the other.
 
-Staff should be able to find a document to share by searching for it by title, not just by scrolling a list. Decide what "search" means here — exact match, prefix, fuzzy, something else — and justify your choice.
+I considered replacing the integer IDs entirely (e.g. `FOLIO-BASE36`) but chose slug + suffix because it reads more naturally and is self-describing without needing a legend.
 
-## What we're intentionally not specifying
+---
 
-- Whether readable IDs **replace** the existing share-token mechanism or **complement** it (there are real tradeoffs either way — privacy, guessability, link permanence)
-- The URL structure for viewing a document
-- How you structure and run schema migrations (see below)
-- How the three features interact with each other
+### Feature 3 — Search by Title
 
-Make these calls yourself and explain your reasoning in your video. We care about your judgment as much as your code.
+A search box on the admin document list lets staff filter documents by typing any part of the title.
 
-## Requirements
+**Implementation:**
+- No migration needed — purely a UI and query change in `public/admin.php`
+- Uses `LIKE %query%` (substring match)
 
-- **Schema changes go through a migration file (or files) you add to the repo**, not by editing `schema.sql` directly. There is no migration system yet — you decide how to organize one. Explain your approach in your video.
-- At least one test covers each feature you build (see `tests/test.php` for the existing pattern).
-- Document creation, scheduling changes, and share actions should be logged to `audit_log` (pattern is in `lib/bootstrap.php`).
-- The `docker compose up` flow should still work from a fresh clone for anyone reviewing your branch.
+**Why substring and not prefix or fuzzy:** Staff often remember a word from the middle of a document name, not necessarily the first word. Prefix match (`title LIKE 'q%'`) would miss `"Q3 Budget Report"` if you search `budget`. Fuzzy matching (Levenshtein) is expensive in SQLite without extensions and overkill for an internal tool. Substring is fast, predictable, and covers how people actually search. FTS5 full-text search would be the right next step for a larger dataset.
 
-## Deliverables
+---
 
-1. A branch with your changes and a commit log that tells the story of your work
-2. A short video (~5 min) walking us through your approach, covering:
-   - What you built and what you scoped out
-   - The design decisions you made and the alternatives you rejected
-   - Anything in the existing code you noticed worth flagging
-   - What you'd do with more time
-   - **Your AI workflow**: what you leaned on AI for, what you did yourself, a moment you pushed back on a suggestion, and anything you noticed about where AI helped or hurt
-3. *(Optional)* Share chat transcripts or links if it's easy — a thoughtful minute in the video is worth more than an unedited log.
+## Migration System
 
-## Time
+The README specified that schema changes should go through migration files rather than edits to `schema.sql`. There was no migration system — I built a minimal one.
 
-Budget ~3 hours. You probably won't finish all three features — **that's expected**. Prioritize, ship what you can finish well, and explain what you skipped and why. Partial + thoughtful beats rushed + complete.
+**Structure:**
+- `migrations/` folder with numbered SQL files (`001_*.sql`, `002_*.sql`)
+- `lib/migrate.php` — a runner that creates a `migrations` tracking table, reads all files in order, and applies any that haven't been recorded yet
+- Each migration runs inside a transaction so a partial failure leaves the DB unchanged
+- `seed.php` calls `run_migrations()` after applying `schema.sql`, so `docker compose up` always works from a clean clone
 
-## What we're looking for
+This is intentionally lightweight. In production I'd add checksum verification, a lock mechanism to prevent concurrent runs, and use a proper migration library like Phinx.
 
-- How you handle ambiguity (the spec is intentionally fuzzy)
-- How you gather context before writing code
-- How you set up and work with AI tools — including when you push back on their suggestions
-- How you verify your own work
-- How you communicate tradeoffs and anything surprising you found
+---
 
-Finished-but-sloppy loses to unfinished-but-thoughtful.
+## Tests
+
+```
+docker compose exec app php tests/test.php
+```
+
+12 tests covering:
+- Existing share link behaviour (regression)
+- Feature 1: `publish_at` null, past, and future cases
+- Feature 2: slug format, uniqueness, DB lookup by readable ID
+- Feature 3: exact match, substring match, empty results, case insensitivity
+
+---
+
+## Things I Noticed in the Existing Code
+
+A few things worth flagging that were already there before my changes:
+
+1. **No CSRF protection** on any POST form. Every state-mutating form should include a token to prevent cross-site request forgery.
+2. **`current_staff()` always returns row #1.** Fine for a demo but this is hardcoded single-user access — not real authentication.
+3. **Timezone mismatch:** `created_at` uses SQLite's `datetime('now')` which is UTC, but `bootstrap.php` sets the app timezone to `America/Chicago`. Datetimes display without conversion. This is a silent inconsistency I worked around in the `publish_at` implementation.
+4. **No input length limits** on title or body — a very large body could grow the SQLite file unboundedly.
+
+---
+
+## What I'd Do With More Time
+
+- **FTS5 full-text search** — SQLite ships with FTS5; a virtual table over `documents(title, body)` would give ranked, tokenised search far beyond LIKE
+- **Timezone-aware display** — store datetimes in UTC, show them in the browser's local timezone using `Intl.DateTimeFormat`
+- **CSRF tokens** — add a `csrf_token()` helper and validate on every POST
+- **Pagination** — the document list has no pagination; with hundreds of documents it would become unusable
+- **Migration checksums** — detect if a previously-applied migration file has been edited on disk
+
+---
+
+## AI Usage Declaration
+
+I used Kimi AI to help with syntax lookups and boilerplate scaffolding during development. All design decisions — readable ID format, search match style, timezone handling, keeping readable IDs staff-only — were made by me after reading and understanding the existing codebase. Every line of code was reviewed and verified before committing.
